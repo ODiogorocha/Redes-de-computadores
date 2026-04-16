@@ -5,7 +5,7 @@
             "mac": "08:00:00:00:01:11",
             "commands": [
                 "route add default gw 10.0.1.10 dev eth0",
-                "arp -i eth0 -s 10.0.1.10 08:00:00:00:01:00 "
+                "arp -i eth0 -s 10.0.1.10 08:00:00:00:01:00"
             ]
         },
         "h2": {
@@ -19,17 +19,11 @@
     },
     "switches": {
         "s1": {
-            "runtime_json": "/home/p4/Documents/Redes-de-computadores/trabalho_1/src/pod-topo/s1-runtime.json"
+            "runtime_json": "topo-simples/s1-runtime.json"
         }
     },
-    "links":[
-        [
-            "h1",
-            "s1-p1"
-        ],
-        [
-            "h2",
-            "s1-p2"
-        ]
+    "links": [
+        ["h1", "s1-p1"],
+        ["h2", "s1-p2"]
     ]
 }
