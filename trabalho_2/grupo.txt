@@ -1,0 +1,10 @@
+Integrantes do Grupo
+
+1. [Nome Completo do Integrante 1]
+2. [Nome Completo do Integrante 2]
+3. [Nome Completo do Integrante 3]
+4. [Nome Completo do Integrante 4]
+
+Disciplina: Redes de Computadores / Tópicos Avançados em Redes
+Universidade Federal de Santa Maria - UFSM
+Trabalho 2 - Telemetria em Switches P4

@@ -1,0 +1,10 @@
+# Comandos para simple_switch_CLI (thrift)
+# Uso: simple_switch_CLI --thrift-port 9090 < s1-commands.txt
+
+# Sessão de clone: pacotes clonados vão para a porta 3 (h3)
+mirroring_add 99 3
+
+# Tabela de encaminhamento IPv4
+table_add MyIngress.ipv4_lpm MyIngress.ipv4_forward 10.0.1.1/32 => 00:00:00:00:01:01 1
+table_add MyIngress.ipv4_lpm MyIngress.ipv4_forward 10.0.2.2/32 => 00:00:00:00:02:02 2
+table_add MyIngress.ipv4_lpm MyIngress.ipv4_forward 10.0.3.3/32 => 00:00:00:00:03:03 3
