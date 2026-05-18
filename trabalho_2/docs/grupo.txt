@@ -1,9 +1,9 @@
 Integrantes do Grupo
 
-1. [Nome Completo do Integrante 1]
-2. [Nome Completo do Integrante 2]
-3. [Nome Completo do Integrante 3]
-4. [Nome Completo do Integrante 4]
+1. Diogo Rocha Marques
+2. Gabriel de Quado 
+3. Marcos Laserda
+4. Weslley Meneses
 
 Disciplina: Redes de Computadores / Tópicos Avançados em Redes
 Universidade Federal de Santa Maria - UFSM

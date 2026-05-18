@@ -1,182 +1,221 @@
-# Trabalho 2 – Telemetria em Switches P4
+# Relatório – Trabalho 2: Telemetria em Switches P4
 
-**Disciplina:** Redes de Computadores  
+**Disciplina:** Redes de Computadores Avançadas  
 **Universidade:** UFSM – Departamento de Computação Aplicada  
-**Grupo:** [Nomes dos integrantes]
 
 ---
 
 ## 1. Abordagem Escolhida
 
-A solução implementa **clonagem de pacotes para um controlador/coletor** (`Clone-to-Collector`). A cada janela de **N = 10 pacotes** observados no plano de dados, o switch P4 cria uma cópia do pacote corrente via `clone3(CloneType.I2E, CLONE_SESSION, meta)`, insere nessa cópia um cabeçalho de telemetria customizado (EtherType `0x9999`) e o encaminha pela porta do host coletor (h3). O pacote original segue seu caminho normalmente; apenas o clone carrega os dados de telemetria.
+A solução implementa **clonagem de pacotes para um controlador/coletor** (*Clone-to-Collector*). A cada janela de **N = 10 pacotes IPv4** processados no ingress do switch, o plano de dados:
 
-Esta abordagem foi escolhida por ser nativa ao BMv2/v1model e não exigir modificação nos hosts finais nem em protocolos existentes.
+1. Coleta as métricas nos registradores;
+2. Preenche campos de metadata anotados com `@field_list`;
+3. Chama `clone_preserving_field_list(CloneType.I2E, 99, 1)` para gerar uma cópia do pacote direcionada ao host h3;
+4. No egress, o clone recebe um cabeçalho de telemetria customizado (EtherType `0x9999`) e é enviado a h3;
+5. O pacote original segue normalmente para seu destino.
+
+Essa abordagem foi escolhida por ser nativa ao modelo v1model do BMv2, não requerer modificações nos hosts finais e produzir os dados de telemetria inteiramente no plano de dados P4.
 
 ---
 
 ## 2. Topologia
 
 ```
-h1 (10.0.1.1) ──┐
-                 ├── s1 (P4 BMv2) ── h3 (10.0.3.3) ← coletor
-h2 (10.0.2.2) ──┘
+h1 (10.0.1.1/24) ── porta 1 ──┐
+                               s1 (BMv2 simple_switch) ── porta 3 ── h3 (10.0.3.3/24)
+h2 (10.0.2.2/24) ── porta 2 ──┘
+                                             ↑ coletor/dashboard
 ```
 
-- **h1** e **h2**: hosts que geram e recebem tráfego (ping, iperf, etc.)  
-- **s1**: switch P4 compilado com o programa `telemetria_trabalho2.p4`  
-- **h3**: host rodando `collector.py`; recebe os clones de telemetria pela porta 3 do switch
+| Nó | Endereço IP  | MAC               | Função               |
+|----|--------------|-------------------|----------------------|
+| h1 | 10.0.1.1/24 | 00:00:00:00:01:01 | Gerador de tráfego   |
+| h2 | 10.0.2.2/24 | 00:00:00:00:02:02 | Receptor de tráfego  |
+| s1 | —           | —                 | Switch P4 (BMv2)     |
+| h3 | 10.0.3.3/24 | 00:00:00:00:03:03 | Coletor de telemetria|
 
-A topologia é descrita em `topo_trabalho2.json` e as entradas de tabela em `s1-runtime.json`.
+A topologia é instanciada por `topo_trabalho2.py`, que cria os nós no Mininet, inicia o `simple_switch` com o JSON compilado e instala automaticamente as regras via `simple_switch_CLI`.
 
 ---
 
 ## 3. Modificações no Programa P4
 
-### 3.1 Novo cabeçalho `telemetry_t`
+### 3.1 Cabeçalho de telemetria (`telemetry_t`)
+
 Inserido após o cabeçalho Ethernet nos pacotes clonados:
 
-| Campo            | Tamanho | Descrição                          |
-|------------------|---------|------------------------------------|
-| `pkt_count`      | 32 bits | Pacotes observados na janela       |
-| `byte_count`     | 32 bits | Bytes observados na janela         |
-| `min_ttl`        | 8 bits  | TTL mínimo visto na janela         |
-| `dominant_proto` | 8 bits  | Protocolo com mais pacotes (0=none)|
-| `reserved`       | 16 bits | Alinhamento / uso futuro           |
+| Campo            | Bits | Descrição                             |
+|------------------|------|---------------------------------------|
+| `pkt_count`      |  32  | Pacotes observados na janela          |
+| `byte_count`     |  32  | Bytes observados na janela            |
+| `min_ttl`        |   8  | TTL mínimo visto na janela            |
+| `dominant_proto` |   8  | Protocolo com mais pacotes (1/6/17)   |
+| `reserved`       |  16  | Alinhamento / uso futuro              |
 
-### 3.2 Registradores adicionados (Ingress)
-- `reg_pkt_count[1]` – contador de pacotes da janela atual  
-- `reg_byte_count[1]` – acumulador de bytes da janela atual  
-- `reg_min_ttl[1]` – menor TTL observado  
-- `reg_proto_count[256]` – contador por protocolo IP (índice = número do protocolo)
+### 3.2 Metadata com `@field_list`
 
-### 3.3 Lógica da janela (Ingress)
-A cada pacote IPv4 válido, os registradores são incrementados. Quando `pkt_count == WINDOW_SIZE`, o switch:
-1. Lê os contadores de TCP (6), UDP (17) e ICMP (1) para determinar o protocolo dominante.
-2. Preenche o `metadata` com os valores coletados.
-3. Chama `clone3()` para gerar o clone de telemetria.
-4. Zera todos os registradores para a próxima janela.
+Os campos de telemetria no metadata são anotados com `@field_list(1)`, garantindo que sejam preservados pelo mecanismo de clonagem do v1model:
 
-### 3.4 Egress – preenchimento do cabeçalho
-No egress, pacotes com `instance_type == 1` (clones de ingress) têm o cabeçalho `telemetry_t` validado e preenchido; o EtherType Ethernet é alterado para `0x9999`.
+```p4
+struct metadata_t {
+    @field_list(FL_TELEM)  bit<32> telem_pkt_count;
+    @field_list(FL_TELEM)  bit<32> telem_byte_count;
+    @field_list(FL_TELEM)  bit<8>  telem_min_ttl;
+    @field_list(FL_TELEM)  bit<8>  telem_dominant_proto;
+}
+```
+
+### 3.3 Registradores (Ingress)
+
+| Registrador       | Tamanho   | Uso                                      |
+|-------------------|-----------|------------------------------------------|
+| `reg_pkt_count`   | 1 × 32b   | Contador de pacotes da janela atual      |
+| `reg_byte_count`  | 1 × 32b   | Acumulador de bytes da janela atual      |
+| `reg_min_ttl`     | 1 × 8b    | Menor TTL observado                      |
+| `reg_proto_count` | 256 × 32b | Contador por número de protocolo IP      |
+
+### 3.4 Lógica da janela
+
+A cada pacote IPv4 válido, os registradores são atualizados. Quando `pkt_count == WINDOW_SIZE (10)`:
+
+1. Os contadores de TCP (6), UDP (17) e ICMP (1) são lidos para determinar o protocolo dominante;
+2. O metadata é preenchido com os valores coletados;
+3. `clone_preserving_field_list` é chamado gerando o clone para a sessão 99;
+4. Todos os registradores são zerados para a próxima janela.
+
+### 3.5 Egress – construção do pacote de telemetria
+
+```p4
+if (std_meta.instance_type == 1) {   // clone de ingress
+    hdr.telemetry.setValid();
+    hdr.telemetry.pkt_count      = meta.telem_pkt_count;
+    hdr.telemetry.byte_count     = meta.telem_byte_count;
+    hdr.telemetry.min_ttl        = meta.telem_min_ttl;
+    hdr.telemetry.dominant_proto = meta.telem_dominant_proto;
+    hdr.ethernet.etherType       = 0x9999;
+}
+```
 
 ---
 
 ## 4. Métricas Exportadas
 
 ### Métricas obrigatórias
-| Métrica        | Campo P4       | Justificativa                                  |
-|----------------|----------------|------------------------------------------------|
-| Pacotes/janela | `pkt_count`    | Mede a taxa de chegada de pacotes              |
-| Bytes/janela   | `byte_count`   | Mede a taxa de throughput                      |
+
+| Métrica        | Campo P4      | Descrição                        |
+|----------------|---------------|----------------------------------|
+| Pacotes/janela | `pkt_count`   | Número de pacotes na janela      |
+| Bytes/janela   | `byte_count`  | Volume de dados na janela        |
 
 ### Métricas adicionais
 
-**Métrica 3 – TTL mínimo observado (`min_ttl`)**  
-O TTL decrementado a cada salto indica a distância da origem ao switch. Valores muito baixos podem sinalizar loops de roteamento ou ataques TTL-expiry. Essa métrica é especialmente relevante em ambientes onde diferentes fontes de tráfego possuem TTLs iniciais distintos, permitindo inferir topologia e detectar anomalias.
+**Métrica 3 – TTL mínimo (`min_ttl`)**  
+O TTL é decrementado a cada salto de roteamento. Valores muito baixos indicam que os pacotes percorreram muitos hops antes de chegar ao switch — útil para detectar loops de roteamento, ataques de TTL-expiry e caracterizar a topologia entre a origem e o ponto de medição. O switch registra o menor TTL visto em toda a janela, capturando o caso mais crítico.
 
 **Métrica 4 – Protocolo dominante (`dominant_proto`)**  
-Identifica qual protocolo de camada 4 (TCP/UDP/ICMP) teve o maior número de pacotes na janela. Essa informação é valiosa para caracterização de tráfego, QoS, e detecção de floods (por exemplo, flood ICMP ou UDP). O campo exporta o número de protocolo IP (1 = ICMP, 6 = TCP, 17 = UDP), decodificado pelo coletor em texto legível.
+Identifica qual protocolo de camada 4 (TCP/UDP/ICMP) teve o maior número de pacotes na janela. Exporta o número de protocolo IP (1 = ICMP, 6 = TCP, 17 = UDP), decodificado pelo coletor. Essa métrica é valiosa para: caracterização de tráfego, priorização/QoS, e detecção de anomalias como floods ICMP ou UDP. Mudanças de tráfego (ex.: de ping para iperf) são imediatamente refletidas nessa métrica.
 
 ---
 
 ## 5. Janela de Observação
 
-A janela é definida por **número de pacotes**: a cada **N = 10** pacotes IPv4 observados no ingress do switch, um relatório de telemetria é exportado. Esta escolha:
+A janela é definida por **número de pacotes**: a cada **N = 10** pacotes IPv4 observados no ingress, um relatório é exportado. Justificativas:
 
-- É determinística e independente do clock do switch (BMv2 não tem timer nativo eficiente).
-- Permite visualização rápida de mudanças de tráfego durante demonstração.
-- Pode ser ajustada alterando a constante `WINDOW_SIZE` no topo do arquivo `.p4`.
+- É determinística e independente de clock (BMv2 não oferece timer de alta resolução nativo);
+- Permite observar rapidamente a variação do tráfego em demonstrações;
+- O valor N pode ser ajustado alterando a constante `WINDOW_SIZE` no `.p4`.
 
 ---
 
-## 6. Compilação e Execução
+## 6. Comandos para Compilar e Executar
 
-### Pré-requisitos
-```
-p4c (>= 1.2.3)
-behavioral-model (bmv2)
-mininet
-python3 + scapy (para testes)
-```
+### Compilar
 
-### Compilar o programa P4
 ```bash
+mkdir -p build
 p4c --target bmv2 --arch v1model \
     --p4runtime-files build/telemetria_trabalho2.p4.p4info.txt \
     -o build/ telemetria_trabalho2.p4
 ```
 
-### Iniciar a topologia Mininet
+### Iniciar a topologia
+
 ```bash
-sudo python3 /usr/local/lib/python3.*/dist-packages/p4_mininet/main.py \
-    --topo topo_trabalho2.json \
-    --behavioral-exe simple_switch_grpc \
-    --json build/telemetria_trabalho2.json
+sudo python3 topo_trabalho2.py
 ```
 
-### Instalar regras de encaminhamento e sessão de clone
-```bash
-simple_switch_CLI --thrift-port 9090 < s1-commands.txt
-# Ou via P4Runtime:
-python3 /path/to/runtime_CLI.py \
-    --p4info build/telemetria_trabalho2.p4.p4info.txt \
-    --bmv2-json build/telemetria_trabalho2.json \
-    --runtime-json s1-runtime.json
+### Iniciar o dashboard em h3 (na CLI do Mininet)
+
+```
+mininet> xterm h3
+# no xterm de h3:
+sudo python3 dashboard.py --iface h3-eth0
 ```
 
-### Iniciar o coletor em h3
-```bash
-# Na CLI do Mininet:
-h3 sudo python3 collector.py --iface h3-eth0 --log telemetry.log
+Ou usando o coletor texto:
+
+```
+mininet> h3 sudo python3 collector.py --iface h3-eth0 &
 ```
 
-### Gerar tráfego de teste
-```bash
-# Ping simples
-h1 ping -c 50 10.0.2.2
+### Gerar tráfego
 
-# Tráfego UDP com iperf
-h1 iperf -u -c 10.0.2.2 -t 30 -b 1M &
-h2 iperf -u -s &
+```
+mininet> h1 ping -c 50 10.0.2.2
+mininet> h2 iperf -u -s &
+mininet> h1 iperf -u -c 10.0.2.2 -t 30 -b 1M
+mininet> h2 iperf -s &
+mininet> h1 iperf -c 10.0.2.2 -t 30
 ```
 
 ---
 
-## 7. Testes e Resultados
+## 7. Logs e Resultados
 
-### Saída do coletor (exemplo)
+### Saída do coletor (modo texto)
+
 ```
-────────────────────────────────────────────────────────────
-  📡  Relatório de Telemetria  –  Janela #1
-  🕐  Timestamp : 2026-05-04 14:32:01
-────────────────────────────────────────────────────────────
-  📦  Pacotes na janela      : 10
-  📊  Bytes na janela        : 980
-  🔺  Tamanho médio (bytes)  : 98.0
-  ⏱️  TTL mínimo observado   : 63
-  🌐  Protocolo dominante    : ICMP (1)
-────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────
+  Janela #0001   [2026-05-04 14:32:01]
+──────────────────────────────────────────────────────
+  Pacotes na janela      : 10
+  Bytes na janela        : 980
+  Tamanho medio (bytes)  : 98.0
+  TTL minimo observado   : 63
+  Protocolo dominante    : ICMP (1)
+──────────────────────────────────────────────────────
 
-────────────────────────────────────────────────────────────
-  📡  Relatório de Telemetria  –  Janela #2
-  🕐  Timestamp : 2026-05-04 14:32:03
-────────────────────────────────────────────────────────────
-  📦  Pacotes na janela      : 10
-  📊  Bytes na janela        : 14820
-  🔺  Tamanho médio (bytes)  : 1482.0
-  ⏱️  TTL mínimo observado   : 63
-  🌐  Protocolo dominante    : UDP (17)
-────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────
+  Janela #0002   [2026-05-04 14:32:05]
+──────────────────────────────────────────────────────
+  Pacotes na janela      : 10
+  Bytes na janela        : 14820
+  Tamanho medio (bytes)  : 1482.0
+  TTL minimo observado   : 63
+  Protocolo dominante    : UDP (17)
+──────────────────────────────────────────────────────
 ```
 
-### Análise
-- **Janela 1** (ping): pacotes pequenos (~98 B), protocolo ICMP dominante.  
-- **Janela 2** (iperf UDP): pacotes grandes (~1482 B), protocolo UDP dominante e byte count ~15x maior.  
-- A mudança no tráfego é imediatamente refletida nas métricas exportadas, validando o funcionamento do mecanismo de telemetria.
-- O encaminhamento entre h1 e h2 não é afetado pela clonagem; o coletor recebe apenas os pacotes de relatório.
+### Verificação do clone com tcpdump
+
+```bash
+h3 tcpdump -i h3-eth0 -n -e ether proto 0x9999
+# Deve exibir 1 pacote a cada 10 pkts h1→h2
+```
 
 ---
 
-## 8. Conclusão
+## 8. Análise dos Resultados
 
-A solução implementada demonstra um mecanismo funcional de telemetria no plano de dados usando P4 e BMv2. A abordagem por clonagem de pacotes é simples, não intrusiva para o tráfego original, e extensível: novas métricas podem ser adicionadas ao cabeçalho de telemetria com mínimas modificações. As quatro métricas exportadas (contagem de pacotes, bytes, TTL mínimo e protocolo dominante) fornecem uma visão representativa do comportamento do tráfego a cada janela de observação.
+- **Janela 1 (ping ICMP):** pacotes pequenos (~98 B), protocolo dominante ICMP, TTL = 63 (1 hop).
+- **Janela 2 (iperf UDP):** pacotes grandes (~1482 B), protocolo dominante UDP, throughput ~15× maior.
+- A mudança do tráfego é imediatamente refletida nas métricas exportadas, validando o mecanismo.
+- O encaminhamento entre h1 e h2 não é afetado; h3 recebe apenas os clones de telemetria.
+- O dashboard Tkinter atualiza em tempo real, mostrando sparklines do histórico e o protocolo dominante com cores distintas para cada protocolo.
+
+---
+
+## 9. Conclusão
+
+A solução demonstra um mecanismo funcional de telemetria no plano de dados usando P4 e BMv2. A abordagem por clonagem é simples, não intrusiva e produz dados exclusivamente no plano de dados P4 — sem depender de `tcpdump` ou estatísticas do Mininet. As quatro métricas exportadas fornecem uma visão representativa do comportamento do tráfego e refletem mudanças em tempo real.

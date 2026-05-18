@@ -1,29 +1,40 @@
 {
-  "hosts": {
-    "h1": {
-      "ip": "10.0.1.1/24",
-      "mac": "00:00:00:00:01:01",
-      "commands": []
+  "_comment": "Metadados da topologia – Trabalho 2 UFSM. A topologia é instanciada por topo_trabalho2.py usando Mininet + BMv2 simple_switch.",
+  "topology": {
+    "hosts": {
+      "h1": { "ip": "10.0.1.1/24", "mac": "00:00:00:00:01:01", "role": "sender" },
+      "h2": { "ip": "10.0.2.2/24", "mac": "00:00:00:00:02:02", "role": "receiver" },
+      "h3": { "ip": "10.0.3.3/24", "mac": "00:00:00:00:03:03", "role": "telemetry_collector" }
     },
-    "h2": {
-      "ip": "10.0.2.2/24",
-      "mac": "00:00:00:00:02:02",
-      "commands": []
+    "switches": {
+      "s1": {
+        "type": "bmv2_simple_switch",
+        "thrift_port": 9090,
+        "program": "build/telemetria_trabalho2.json",
+        "ports": {
+          "1": "h1",
+          "2": "h2",
+          "3": "h3"
+        }
+      }
     },
-    "h3": {
-      "ip": "10.0.3.3/24",
-      "mac": "00:00:00:00:03:03",
-      "commands": ["python3 /home/p4/collector.py &"]
-    }
+    "links": [
+      { "src": "h1", "dst": "s1", "src_port": "h1-eth0", "dst_port": 1 },
+      { "src": "h2", "dst": "s1", "src_port": "h2-eth0", "dst_port": 2 },
+      { "src": "h3", "dst": "s1", "src_port": "h3-eth0", "dst_port": 3 }
+    ]
   },
-  "switches": {
-    "s1": {
-      "runtime_json": "s1-runtime.json"
-    }
-  },
-  "links": [
-    ["h1", "s1-p1"],
-    ["h2", "s1-p2"],
-    ["h3", "s1-p3"]
-  ]
+  "telemetry": {
+    "approach": "packet_cloning",
+    "clone_session": 99,
+    "clone_egress_port": 3,
+    "etype": "0x9999",
+    "window_size_packets": 10,
+    "metrics": [
+      { "name": "pkt_count",      "bits": 32, "description": "Pacotes observados na janela" },
+      { "name": "byte_count",     "bits": 32, "description": "Bytes observados na janela" },
+      { "name": "min_ttl",        "bits":  8, "description": "TTL mínimo observado na janela" },
+      { "name": "dominant_proto", "bits":  8, "description": "Protocolo IP mais frequente (1=ICMP,6=TCP,17=UDP)" }
+    ]
+  }
 }

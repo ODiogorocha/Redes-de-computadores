@@ -1,0 +1,105 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Trabalho 2 – Telemetria P4  |  Guia Completo de Execução
+  UFSM – Departamento de Computação Aplicada
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARQUIVOS ENTREGUES
+──────────────────
+  telemetria_trabalho2.p4   programa P4 do switch
+  topo_trabalho2.json       metadados da topologia
+  topo_trabalho2.py         script que sobe o Mininet + switch P4
+  s1-commands.txt           regras para simple_switch_CLI
+  collector.py              coletor de telemetria (saída texto)
+  dashboard.py              coletor + dashboard Tkinter (visual)
+  grupo.txt                 integrantes do grupo
+  relatorio_trabalho2.md    relatório (2-4 páginas)
+  COMO_RODAR.txt            este arquivo
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PASSO 1 – Compilar o programa P4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  mkdir -p build
+
+  p4c --target bmv2 --arch v1model \
+      --p4runtime-files build/telemetria_trabalho2.p4.p4info.txt \
+      -o build/ telemetria_trabalho2.p4
+
+  Resultado em build/:
+    telemetria_trabalho2.json
+    telemetria_trabalho2.p4.p4info.txt
+
+  O aviso sobre .txt/.txtpb é inofensivo.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PASSO 2 – Iniciar a topologia Mininet
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  sudo python3 topo_trabalho2.py
+
+  O script faz automaticamente:
+    • Cria h1, h2, h3 e s1 no Mininet
+    • Inicia o simple_switch com o JSON compilado
+    • Instala as regras de encaminhamento e a sessão de clone
+    • Popula tabelas ARP nos hosts
+    • Abre a CLI do Mininet
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PASSO 3 – Iniciar o coletor/dashboard em h3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  OPÇÃO A – Dashboard visual Tkinter (recomendado para demonstração):
+
+    mininet> xterm h3
+    # No xterm de h3:
+    sudo python3 dashboard.py --iface h3-eth0
+
+  OPÇÃO B – Coletor texto no terminal:
+
+    mininet> h3 sudo python3 collector.py --iface h3-eth0 &
+
+    Ou com log em arquivo:
+    mininet> h3 sudo python3 collector.py --iface h3-eth0 --log telemetry.log &
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PASSO 4 – Gerar tráfego entre os hosts
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Verifica encaminhamento:
+  mininet> h1 ping -c 3 10.0.2.2
+
+  # Gera janelas de telemetria com ping ICMP:
+  mininet> h1 ping -c 50 10.0.2.2
+
+  # Tráfego UDP com iperf:
+  mininet> h2 iperf -u -s &
+  mininet> h1 iperf -u -c 10.0.2.2 -t 30 -b 1M
+
+  # Tráfego TCP com iperf:
+  mininet> h2 iperf -s &
+  mininet> h1 iperf -c 10.0.2.2 -t 30
+
+  A cada 10 pacotes processados pelo switch, uma janela de
+  telemetria é enviada para h3 e exibida no coletor/dashboard.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFICAÇÃO
+━━━━━━━━━━━
+  # Confirmar que h3 recebe os clones (EtherType 0x9999):
+  mininet> h3 tcpdump -i h3-eth0 -n -e ether proto 0x9999
+
+  # Ver log detalhado do switch BMv2:
+  tail -f /tmp/s1_bmv2.log
+
+  # Reinstalar regras manualmente (se necessário):
+  simple_switch_CLI --thrift-port 9090 < s1-commands.txt
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MÉTRICAS EXPORTADAS
+━━━━━━━━━━━━━━━━━━━
+  1. pkt_count       – pacotes na janela          (obrigatório)
+  2. byte_count      – bytes na janela            (obrigatório)
+  3. min_ttl         – TTL mínimo observado       (adicional)
+  4. dominant_proto  – protocolo mais frequente   (adicional)
+
+  Janela: N = 10 pacotes (WINDOW_SIZE no .p4)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
