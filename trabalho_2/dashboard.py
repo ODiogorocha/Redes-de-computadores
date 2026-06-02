@@ -48,14 +48,43 @@ GRAPH_H = 80
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
 def parse_telemetry(raw: bytes):
-    """Retorna (pkt_count, byte_count, min_ttl, dominant_proto) ou None."""
-    if len(raw) < 24:
+    """
+    Cabeçalho de telemetria P4:
+
+    pkt_count       uint32
+    byte_count      uint32
+    min_ttl         uint8
+    dominant_proto  uint8
+    reserved        uint16
+    """
+
+    if len(raw) < 26:
         return None
-    etype = struct.unpack("!H", raw[12:14])[0]
-    if etype != TELEM_ETYPE:
+
+    try:
+        ether_type = struct.unpack("!H", raw[12:14])[0]
+
+        if ether_type != TELEM_ETYPE:
+            return None
+
+        pkt, byt, ttl, proto, reserved = struct.unpack(
+            "!IIBBH",
+            raw[14:26]
+        )
+
+        print(
+            f"[TELEM] "
+            f"pkts={pkt} "
+            f"bytes={byt} "
+            f"ttl={ttl} "
+            f"proto={proto}"
+        )
+
+        return pkt, byt, ttl, proto
+
+    except Exception as e:
+        print(f"[PARSE ERROR] {e}")
         return None
-    pkt, byt, ttl, proto = struct.unpack("!IIBB", raw[14:24])
-    return pkt, byt, ttl, proto
 
 def proto_name(n: int) -> str:
     return PROTO_NAMES.get(n, "?")
@@ -90,7 +119,11 @@ class Sparkline(tk.Canvas):
                 for i, v in enumerate(vals)]
 
         poly = [0, H] + [c for p in pts for c in p] + [W, H]
-        self.create_polygon(poly, fill=self.color + "28", outline="")
+        self.create_polygon(
+            poly,
+            fill="",
+            outline=""
+        )
 
         for i in range(len(pts) - 1):
             self.create_line(*pts[i], *pts[i + 1],
@@ -299,16 +332,30 @@ class Dashboard(tk.Tk):
 
     def _recv_loop(self):
         try:
-            sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW,
-                                 socket.htons(ETH_P_ALL))
+            print(f"[INFO] Abrindo socket em {self._iface}")
+
+            sock = socket.socket(
+                socket.AF_PACKET,
+                socket.SOCK_RAW,
+                socket.htons(ETH_P_ALL)
+            )
+
             sock.bind((self._iface, 0))
+
+            print("[INFO] Socket aberto com sucesso")
+
         except PermissionError:
             with self._lock:
-                self._queue.append(("err", "Permissão negada. Execute com sudo."))
+                self._queue.append(
+                    ("err", "Execute com sudo.")
+                )
             return
+
         except OSError as e:
             with self._lock:
-                self._queue.append(("err", str(e)))
+                self._queue.append(
+                    ("err", str(e))
+                )
             return
 
         with self._lock:
@@ -316,14 +363,25 @@ class Dashboard(tk.Tk):
 
         while True:
             try:
-                raw, _ = sock.recvfrom(65535)
+                raw, addr = sock.recvfrom(65535)
+
+                print(
+                    f"[RX] frame recebido "
+                    f"tam={len(raw)}"
+                )
+
                 result = parse_telemetry(raw)
+
                 if result is None:
                     continue
+
                 with self._lock:
-                    self._queue.append(("data", *result))
-            except Exception:
-                continue
+                    self._queue.append(
+                        ("data", *result)
+                    )
+
+            except Exception as e:
+                print(f"[ERRO SOCKET] {e}")
 
     def _poll(self):
         with self._lock:

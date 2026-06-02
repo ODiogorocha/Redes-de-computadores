@@ -1,26 +1,4 @@
 #!/usr/bin/env python3
-"""
-topo_trabalho2.py  –  Topologia Mininet + switch P4 para o Trabalho 2
-Usa simple_switch (BMv2) com node customizado P4Switch.
-
-Topologia:
-    h1 (10.0.1.1) ──┐
-                     ├── s1 (P4 BMv2) ── h3 (10.0.3.3)  coletor/dashboard
-    h2 (10.0.2.2) ──┘
-
-Portas do switch:
-    porta 1 → h1
-    porta 2 → h2
-    porta 3 → h3
-
-Uso:
-    sudo python3 topo_trabalho2.py
-
-Pré-requisito: programa P4 já compilado em ./build/
-    p4c --target bmv2 --arch v1model \\
-        --p4runtime-files build/telemetria_trabalho2.p4.p4info.txt \\
-        -o build/ telemetria_trabalho2.p4
-"""
 
 import os
 import sys

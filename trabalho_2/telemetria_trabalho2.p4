@@ -1,11 +1,3 @@
-/* ============================================================
- * telemetria_trabalho2.p4
- * Telemetria via clonagem de pacotes (Clone-to-Collector)
- * Métricas: pacotes/janela, bytes/janela, TTL mínimo, protocolo dominante
- * Janela : a cada WINDOW_SIZE=10 pacotes IPv4 observados
- *
- * API moderna: clone_preserving_field_list  (p4c >= 1.2.4)
- * ============================================================ */
 
 #include <core.p4>
 #include <v1model.p4>

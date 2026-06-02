@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-"""
-collector.py  –  Coletor de telemetria P4 (saída em texto)
-Escuta na interface de h3 por pacotes com EtherType 0x9999,
-decodifica o cabeçalho de telemetria e exibe/salva as métricas.
-
-Estrutura do cabeçalho de telemetria (10 bytes após Ethernet):
-  [0-3]  pkt_count      uint32 big-endian  – pacotes na janela
-  [4-7]  byte_count     uint32 big-endian  – bytes na janela
-  [8]    min_ttl        uint8              – TTL mínimo observado
-  [9]    dominant_proto uint8              – protocolo dominante (1/6/17)
-
-Uso (no host h3 dentro do Mininet):
-  sudo python3 collector.py --iface h3-eth0
-  sudo python3 collector.py --iface h3-eth0 --log telemetry.log
-"""
-
 import argparse
 import struct
 import socket
