@@ -1,0 +1,10 @@
+Integrantes do Grupo
+
+1. Diogo Rocha Marques
+2. Gabriel de Quado 
+3. Marcos Laserda
+4. Weslley Menezes
+
+Disciplina: Redes de Computadores / Tópicos Avançados em Redes
+Universidade Federal de Santa Maria - UFSM
+Trabalho 2 - Telemetria em Switches P4
