@@ -1,79 +1,63 @@
 #!/usr/bin/env python3
-"""
-traffic_gen.py — Trabalho 4 (UFSM)
-===================================
-
-Gerador de tráfego usado na demonstração. Produz duas condições:
-
-  --mode normal : baixa taxa de pacotes, permanece abaixo dos limiares
-                  da política do controlador (fluxo tratado normalmente).
-
-  --mode burst  : rajada de pacotes do MESMO IP de origem, suficiente
-                  para ultrapassar MARK_PKT_THRESHOLD (40) e depois
-                  BLOCK_PKT_THRESHOLD (100) definidos em controller.py,
-                  evidenciando a decisão automática (marcação e depois
-                  bloqueio do fluxo).
-
-Executar dentro do Mininet, a partir de h1 (origem) em direção a h2:
-
-    h1 python3 traffic_gen.py --dst 10.0.2.2 --mode normal
-    h1 python3 traffic_gen.py --dst 10.0.2.2 --mode burst
-
-Requer Scapy (já normalmente disponível no ambiente Mininet/P4).
-"""
-
-import argparse
 import time
+import random
+import socket
+import json
+import os
 
-from scapy.all import IP, ICMP, UDP, Raw, send
+TARGET_IP = "10.0.0.2"
+SHARED_FILE = "shared_metrics.json"
 
+def enviar_pacotes(pps, duracao, perfil):
+    print(f"[{time.strftime('%H:%M:%S')}] Modo: {perfil} | Enviando a {pps} pps...")
+    
+    dados = {
+        "status_gerador": " Executando",
+        "perfil_atual": perfil,
+        "pps": pps,
+        "kbps": round(pps * 4.33, 2), 
+        "timestamp": time.time()
+    }
+    with open(SHARED_FILE, 'w') as f:
+        json.dump(dados, f)
 
-def run_normal(dst: str, count: int, interval: float):
-    print(f"[traffic_gen] Tráfego NORMAL -> {dst} "
-          f"({count} pacotes, intervalo={interval}s)")
-    for i in range(count):
-        send(IP(dst=dst) / ICMP(), verbose=False)
-        print(f"  pacote {i + 1}/{count} enviado")
-        time.sleep(interval)
-    print("[traffic_gen] Concluído. Esse fluxo NÃO deve ultrapassar o limiar "
-          "de marcação (verifique o log do controller.py).")
+    intervalo = 1.0 / pps if pps > 0 else 1.0
+    inicio = time.time()
+    
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    payload = b"X" * 500 
 
-
-def run_burst(dst: str, count: int, interval: float):
-    print(f"[traffic_gen] Tráfego em RAJADA -> {dst} "
-          f"({count} pacotes, intervalo={interval}s) — deve disparar a "
-          f"marcação e, em seguida, o bloqueio automático do fluxo.")
-    payload = Raw(load=b"X" * 200)  # aumenta os bytes por pacote
-    for i in range(count):
-        send(IP(dst=dst) / UDP(dport=9999) / payload, verbose=False)
-        if (i + 1) % 10 == 0:
-            print(f"  {i + 1}/{count} pacotes enviados")
-        time.sleep(interval)
-    print("[traffic_gen] Concluído. Verifique no log do controller.py que o "
-          "fluxo foi MARCADO e depois BLOQUEADO automaticamente.")
-
+    while time.time() - inicio < duracao:
+        if pps > 0:
+            try:
+                sock.sendto(payload, (TARGET_IP, 12345))
+            except:
+                pass
+            time.sleep(intervalo)
+        else:
+            time.sleep(1)
 
 def main():
-    ap = argparse.ArgumentParser(description="Gerador de tráfego — Trabalho 4")
-    ap.add_argument("--dst", required=True, help="IP de destino (ex.: 10.0.2.2)")
-    ap.add_argument("--mode", choices=["normal", "burst"], default="normal")
-    ap.add_argument("--count", type=int, default=None,
-                    help="Número de pacotes (padrão: 15 no modo normal, "
-                         "150 no modo burst)")
-    ap.add_argument("--interval", type=float, default=None,
-                    help="Intervalo entre pacotes em segundos "
-                         "(padrão: 0.5 no modo normal, 0.02 no modo burst)")
-    args = ap.parse_args()
+    print(" Gerador Automático de Tráfego Iniciado em Loop Infinito...")
+    
+    try:
+        while True:
+            duracao_normal = random.randint(10, 15)
+            pps_normal = random.randint(5, 12)
+            enviar_pacotes(pps_normal, duracao_normal, "Normal (Apenas Pings)")
 
-    if args.mode == "normal":
-        count    = args.count if args.count is not None else 15
-        interval = args.interval if args.interval is not None else 0.5
-        run_normal(args.dst, count, interval)
-    else:
-        count    = args.count if args.count is not None else 150
-        interval = args.interval if args.interval is not None else 0.02
-        run_burst(args.dst, count, interval)
+            duracao_carga = random.randint(5, 8)
+            pps_carga = random.randint(35, 50)
+            enviar_pacotes(pps_carga, duracao_carga, "Carga Oscilante (Pico)")
 
+            duracao_ataque = random.randint(12, 18)
+            pps_ataque = random.randint(90, 125)
+            enviar_pacotes(pps_ataque, duracao_ataque, " Carga Intensa (Ataque DoS)")
+
+    except KeyboardInterrupt:
+        print("\n Gerador desligado pelo usuário.")
+        if os.path.exists(SHARED_FILE):
+            os.remove(SHARED_FILE)
 
 if __name__ == "__main__":
     main()
